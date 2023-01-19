@@ -98,9 +98,9 @@ mod timer {
         type State = ();
         type Event = Event;
 
-        fn request_update(&self, now: &Instant) -> Option<(Instant, fn(Instant) -> Event)> {
+        fn request_update(&self) -> Option<(Instant, fn(Instant) -> Event)> {
             if self.is_started {
-                Some((*now + Duration::from_millis(1000), |_now| Event::Decrement))
+                Some((Instant::now() + Duration::from_millis(1000), |_now| Event::Decrement))
             } else {
                 None
             }
