@@ -8,6 +8,7 @@ use iced_native::widget;
 use iced_native::widget::tree::{self, Tree};
 use iced_native::{
     Clipboard, Element, Length, Point, Rectangle, Shell, Size, Widget,
+    time::Instant,
 };
 
 use ouroboros::self_referencing;
@@ -56,6 +57,10 @@ pub trait Component<Message, Renderer> {
         _operation: &mut dyn widget::Operation<Message>,
     ) {
     }
+
+    fn request_update(&self, _now: &Instant) -> Option<(Instant, fn(Instant) -> Self::Event)> {
+        None
+    }
 }
 
 /// Turns an implementor of [`Component`] into an [`Element`] that can be
@@ -79,11 +84,13 @@ where
             }
             .build(),
         )),
+        request_update_at: None,
     })
 }
 
 struct Instance<'a, Message, Renderer, Event, S> {
     state: RefCell<Option<State<'a, Message, Renderer, Event, S>>>,
+    request_update_at: Option<(Instant, fn(Instant) -> Event)>,
 }
 
 #[self_referencing]
@@ -211,8 +218,19 @@ where
         shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         let mut local_messages = Vec::new();
-        let mut local_shell = Shell::new(&mut local_messages);
 
+        if let iced_native::Event::Window(iced_native::window::Event::RedrawRequested(now)) = &event {
+            if let Some((at, f)) = self.request_update_at {
+                if at<=*now {
+                    local_messages.push(f(*now));
+                    self.request_update_at = None;
+                } else {
+                    shell.request_redraw(iced_native::window::RedrawRequest::At(at));
+                }
+            }
+        }
+
+        let mut local_shell = Shell::new(&mut local_messages);
         let event_status = self.with_element_mut(|element| {
             element.as_widget_mut().on_event(
                 &mut tree.children[0],
@@ -236,6 +254,13 @@ where
                     .update(tree.state.downcast_mut::<S>(), message)
             }) {
                 shell.publish(message);
+            }
+
+            if self.request_update_at.is_none() {
+                self.request_update_at = heads.component.request_update(&Instant::now());
+                if let Some((at, _)) = &self.request_update_at {
+                    shell.request_redraw(iced_native::window::RedrawRequest::At(*at));
+                }
             }
 
             self.state = RefCell::new(Some(
