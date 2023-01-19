@@ -1,4 +1,4 @@
-use iced::widget::container;
+use iced::widget::{container, column};
 use iced::{Element, Length, Sandbox, Settings};
 
 use timer::timer;
@@ -39,7 +39,12 @@ impl Sandbox for Component {
     }
 
     fn view(&self) -> Element<Message> {
-        container(timer(self.value, Message::Finished))
+        let timers = column![
+            timer(self.value, Message::Finished),
+            timer(self.value, Message::Finished),
+            timer(self.value, Message::Finished),
+        ].spacing(5);
+        container(timers)
             .padding(20)
             .height(Length::Fill)
             .center_y()
@@ -57,9 +62,13 @@ mod timer {
     use super::numeric_input::numeric_input;
 
     pub struct Timer<Message> {
-        seconds: u32,
         seconds_setup: Option<u32>,
         on_finished: Message,
+    }
+
+    #[derive(Default)]
+    pub struct State {
+        seconds: u32,
         is_started: bool,
     }
 
@@ -85,9 +94,8 @@ mod timer {
             on_finished: Message,
         ) -> Self {
             Self {
-                seconds, seconds_setup: Some(seconds),
+                seconds_setup: Some(seconds),
                 on_finished: on_finished,
-                is_started: false,
             }
         }
     }
@@ -100,11 +108,11 @@ mod timer {
             + widget::text::StyleSheet,
         Message: Clone
     {
-        type State = ();
+        type State = State;
         type Event = Event;
 
-        fn request_update(&self) -> Option<(Instant, fn(Instant) -> Event)> {
-            if self.is_started {
+        fn request_update(&self, state: &Self::State) -> Option<(Instant, fn(Instant) -> Event)> {
+            if state.is_started {
                 Some((Instant::now() + Duration::from_millis(500), |_now| Event::Decrement))
             } else {
                 None
@@ -113,14 +121,14 @@ mod timer {
 
         fn update(
             &mut self,
-            _state: &mut Self::State,
+            state: &mut Self::State,
             event: Event,
         ) -> Option<Message> {
             match event {
-                Event::Decrement if self.is_started => {
-                    self.seconds = self.seconds.saturating_sub(1);
-                    if self.seconds == 0 {
-                        self.is_started = false;
+                Event::Decrement if state.is_started => {
+                    state.seconds = state.seconds.saturating_sub(1);
+                    if state.seconds == 0 {
+                        state.is_started = false;
                         Some(self.on_finished.clone())
                     } else {
                         None
@@ -131,16 +139,16 @@ mod timer {
                     None
                 },
                 Event::Start if self.seconds_setup.is_some() => {
-                    self.seconds = self.seconds_setup.unwrap();
-                    self.is_started = true;
+                    state.seconds = self.seconds_setup.unwrap();
+                    state.is_started = true;
                     None
                 }
-                Event::Pause => {self.is_started = false; None}
+                Event::Pause => {state.is_started = false; None}
                 _ => None,
             }
         }
 
-        fn view(&self, _state: &Self::State) -> Element<Event, Renderer> {
+        fn view(&self, state: &Self::State) -> Element<Event, Renderer> {
             let seconds_input = numeric_input(self.seconds_setup, Event::SecondsChanged);
 
             let button = |label, on_press| {
@@ -157,14 +165,14 @@ mod timer {
 
 //             column![
                 row![
-                    if self.is_started {
+                    if state.is_started {
                         button("Pause", Event::Pause)
                     } else {
                         button("Start", Event::Start)
                     },
-                    if self.is_started {
+                    if state.is_started {
                         Element::from(text(
-                            self.seconds.to_string()
+                            state.seconds.to_string()
                         ))
                     } else {
                         seconds_input.into()

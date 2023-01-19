@@ -58,7 +58,7 @@ pub trait Component<Message, Renderer> {
     ) {
     }
 
-    fn request_update(&self) -> Option<(Instant, fn(Instant) -> Self::Event)> {
+    fn request_update(&self, _state: &Self::State) -> Option<(Instant, fn(Instant) -> Self::Event)> {
         None
     }
 }
@@ -257,7 +257,7 @@ where
             }
 
             if self.request_update_at.is_none() {
-                self.request_update_at = heads.component.request_update();
+                self.request_update_at = heads.component.request_update(tree.state.downcast_mut::<S>());
                 if let Some((at, _)) = &self.request_update_at {
                     shell.request_redraw(iced_native::window::RedrawRequest::At(*at));
                 }
