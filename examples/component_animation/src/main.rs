@@ -61,22 +61,37 @@ mod timer {
 
     use super::numeric_input::numeric_input;
 
-    pub struct Timer<Message> {
-        seconds_setup: Option<u32>,
-        on_finished: Message,
-    }
-
-    #[derive(Default)]
-    pub struct State {
-        seconds: u32,
-        is_started: bool,
-    }
-
     pub fn timer<Message>(
         seconds: u32,
         on_finished: Message,
     ) -> Timer<Message> {
         Timer::new(seconds, on_finished)
+    }
+
+    pub struct Timer<Message> {
+        seconds_setup: Option<u32>,
+        on_finished: Message,
+        on_setup: Option< fn(Option<u32>) -> Message >,
+    }
+
+    #[derive(Clone, Copy)]
+    pub enum State {
+        Setup,
+        Working(u32),
+        Paused(u32),
+        Finished,
+    }
+
+    impl Default for State {
+        fn default() -> Self {
+            State::Setup
+        }
+    }
+
+    impl State {
+        fn is_working(&self) -> bool {
+            matches!(self, &State::Working(_))
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -96,7 +111,12 @@ mod timer {
             Self {
                 seconds_setup: Some(seconds),
                 on_finished: on_finished,
+                on_setup: None,
             }
+        }
+        pub fn on_setup(mut self, f: fn(Option<u32>) -> Message) -> Self {
+            self.on_setup = Some(f);
+            self
         }
     }
 
@@ -112,7 +132,7 @@ mod timer {
         type Event = Event;
 
         fn request_update(&self, state: &Self::State) -> Option<(Instant, fn(Instant) -> Event)> {
-            if state.is_started {
+            if state.is_working() {
                 Some((Instant::now() + Duration::from_millis(500), |_now| Event::Decrement))
             } else {
                 None
@@ -124,32 +144,43 @@ mod timer {
             state: &mut Self::State,
             event: Event,
         ) -> Option<Message> {
-            match event {
-                Event::Decrement if state.is_started => {
-                    state.seconds = state.seconds.saturating_sub(1);
-                    if state.seconds == 0 {
-                        state.is_started = false;
+            let (new_state, message) = match (event, &mut *state) {
+            (Event::Decrement, State::Working(seconds)) => {
+                *seconds = seconds.saturating_sub(1);
+                if *seconds == 0 {
+                    (
+                        State::Finished,
                         Some(self.on_finished.clone())
-                    } else {
-                        None
-                    }
+                    )
+                } else {
+                    (State::Working(*seconds), None)
                 }
-                Event::SecondsChanged(value) => {
-                    self.seconds_setup = value;
-                    None
-                },
-                Event::Start if self.seconds_setup.is_some() => {
-                    state.seconds = self.seconds_setup.unwrap();
-                    state.is_started = true;
-                    None
-                }
-                Event::Pause => {state.is_started = false; None}
-                _ => None,
             }
+            (Event::SecondsChanged(value), State::Setup) => {
+                self.seconds_setup = value;
+                (State::Setup, None)
+            },
+            (Event::Start, State::Setup) => (
+                if let Some(seconds) = self.seconds_setup {
+                    State::Working(seconds)
+                } else {
+                    State::Setup
+                },
+                None
+            ),
+            (Event::Start, State::Paused(seconds)) => (
+                State::Working(*seconds),
+                None
+            ),
+            (Event::Pause, State::Working(seconds)) => (State::Paused(*seconds), None),
+            (Event::Stop, _) => (State::Setup, None),
+            (_, state) => (*state, None),
+            };
+            *state = new_state;
+            message
         }
 
         fn view(&self, state: &Self::State) -> Element<Event, Renderer> {
-            let seconds_input = numeric_input(self.seconds_setup, Event::SecondsChanged);
 
             let button = |label, on_press| {
                 button(
@@ -163,25 +194,38 @@ mod timer {
                 .on_press(on_press)
             };
 
-//             column![
+            match state {
+            State::Setup => {
                 row![
-                    if state.is_started {
+                    button("Start", Event::Start),
+                    numeric_input(self.seconds_setup, Event::SecondsChanged)
+                ]
+            }
+            State::Working(seconds) | State::Paused(seconds) => {
+                row![
+                    if state.is_working() {
                         button("Pause", Event::Pause)
                     } else {
                         button("Start", Event::Start)
                     },
-                    if state.is_started {
-                        Element::from(text(
-                            state.seconds.to_string()
-                        ))
-                    } else {
-                        seconds_input.into()
-                    },
-//                 ],
-            ]
-            .align_items(Alignment::Fill)
-            .spacing(10)
-            .into()
+                    button("Stop", Event::Stop),
+
+                    Element::from(text(
+                        seconds.to_string()
+                    ))
+                    ,
+                ]
+            }
+            State::Finished => {
+                row![
+                    text("Finished"),
+                    button("Stop", Event::Stop),
+                ]
+            }
+            }
+                .align_items(Alignment::Fill)
+                .spacing(10)
+                .into()
         }
     }
 
